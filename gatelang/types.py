@@ -99,7 +99,7 @@ def policy_seq(p1: PolicySnapshot, p2: PolicySnapshot) -> PolicySnapshot:
     minEvidence = max(p1.minEvidence, p2.minEvidence)
     """
     return PolicySnapshot(
-        id=p1.id + p2.id,
+        id=p1.id + p2.id + 1,
         min_evidence=max(p1.min_evidence, p2.min_evidence),
         effective_at=max(p1.effective_at, p2.effective_at)
     )

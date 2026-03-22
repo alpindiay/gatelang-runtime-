@@ -4,7 +4,7 @@
 **A. A. Noh · UTE TLI SYSTEMS · DOI: 10.17605/OSF.IO/49UMB**
 
 Lean 4 верификация: [github.com/alpindiay/lean4-ute-tli](https://github.com/alpindiay/lean4-ute-tli)  
-920 верифицированных утверждений · 0 sorry · Lean 4 v4.29.0-rc6
+1138 верифицированных утверждений · 0 sorry · Lean 4 v4.29.0-rc6
 
 ---
 

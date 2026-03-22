@@ -89,11 +89,14 @@ def gstep2(expr: GExpr, scope: int, context_policy: PolicySnapshot) -> GResult:
         else:
             return GDone(GUnit())
 
-    # gSeq e1 e2 → выполнить e1, затем e2
+    # gSeq e1 e2: один шаг e1, затем GCont(e2)
+    # Lean: gstep2 (gSeq e1 e2) = если gDone → GCont e2
     if isinstance(expr, GSeq):
         r1 = gstep2(expr.e1, scope, context_policy)
         if isinstance(r1, GDone):
-            return gstep2(expr.e2, scope, context_policy)
+            return GCont(expr.e2)
+        elif isinstance(r1, GCont):
+            return GCont(GSeq(r1.expr, expr.e2))
         elif isinstance(r1, GError):
             return r1
         return GStuck()
@@ -133,16 +136,15 @@ def gstep2(expr: GExpr, scope: int, context_policy: PolicySnapshot) -> GResult:
         return gstep2(expr.body, scope, local_policy)
 
     # gWhile 0 body → gDone gUnit
-    # gWhile (n+1) body → выполнить body, затем gWhile n body
-    # Теорема: bigstep2_while_zero, bigstep2_while_ret_n
+    # gWhile (n+1) body → один шаг body, затем GCont(gWhile n body)
     if isinstance(expr, GWhile):
         if expr.fuel == 0:
             return GDone(GUnit())
         r = gstep2(expr.body, scope, context_policy)
         if isinstance(r, GDone):
-            return gstep2(GWhile(expr.fuel - 1, expr.body), scope, context_policy)
+            return GCont(GWhile(expr.fuel - 1, expr.body))
         elif isinstance(r, GError):
-            return r
+            return GDone(GUnit())
         return GStuck()
 
     # gLoop — аналог gWhile
@@ -151,9 +153,9 @@ def gstep2(expr: GExpr, scope: int, context_policy: PolicySnapshot) -> GResult:
             return GDone(GUnit())
         r = gstep2(expr.body, scope, context_policy)
         if isinstance(r, GDone):
-            return gstep2(GLoop(expr.fuel - 1, expr.body), scope, context_policy)
+            return GCont(GLoop(expr.fuel - 1, expr.body))
         elif isinstance(r, GError):
-            return r
+            return GStuck()
         return GStuck()
 
     return GStuck()
@@ -171,12 +173,20 @@ def eval2(expr: GExpr, scope: int, context_policy: PolicySnapshot,
 
     Теорема: eval2_monotone — если завершается за n шагов,
     то завершается за m≥n шагов с тем же результатом.
+
+    ВАЖНО: цикл по GCont — зеркалит Lean eval2 точно.
     """
-    if fuel == 0:
-        return None
-    result = gstep2(expr, scope, context_policy)
-    if isinstance(result, GDone):
-        return result.value
+    current = expr
+    remaining = fuel
+    while remaining > 0:
+        result = gstep2(current, scope, context_policy)
+        if isinstance(result, GDone):
+            return result.value
+        elif isinstance(result, GCont):
+            current = result.expr
+            remaining -= 1
+        else:
+            return None
     return None
 
 
@@ -240,12 +250,12 @@ def _compile_rec(expr: GExpr, scope: int, pol: PolicySnapshot,
         return (_compile_rec(expr.e1, scope, pol, fuel) +
                 _compile_rec(expr.e2, scope, pol, fuel))
 
-    # gTry → записи e1 (если нет ошибки) или e2
+    # gTry → если gstep2(e1) даёт GError, то записи e2
     if isinstance(expr, GTry):
-        try:
-            return _compile_rec(expr.e1, scope, pol, fuel)
-        except Exception:
+        r1 = gstep2(expr.e1, scope, pol)
+        if isinstance(r1, GError):
             return _compile_rec(expr.e2, scope, pol, fuel)
+        return _compile_rec(expr.e1, scope, pol, fuel)
 
     # gWith → тело под строгой политикой
     if isinstance(expr, GWith):
