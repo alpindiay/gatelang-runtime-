@@ -61,3 +61,5 @@ __all__ = [
     # Typechecker
     "typecheck", "typecheck_safe", "verify_program", "TypeCheckError",
 ]
+
+from .interpreter import GateLangInterpreter, InterpreterState
