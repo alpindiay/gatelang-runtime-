@@ -196,6 +196,33 @@ python -m pytest tests/ -v
 
 ---
 
+
+## REST API
+```bash
+# Установить Flask
+pip3 install flask
+
+# Запустить сервер
+python3 -c "from gatelang.server import start_server; start_server()"
+# → http://127.0.0.1:8080
+```
+
+| Endpoint | Метод | Описание |
+|---|---|---|
+| `/health` | GET | Health check |
+| `/info` | GET | Runtime info (1213 теорем, 0 sorry) |
+| `/run` | POST | Выполнить программу → LedgerRecord + 7-tuple |
+| `/typecheck` | POST | Проверить типы без выполнения |
+| `/compile` | POST | Скомпилировать → список LedgerRecord |
+| `/batch` | POST | Выполнить несколько программ сразу |
+
+Пример:
+```bash
+curl -X POST http://127.0.0.1:8080/run \
+  -H "Content-Type: application/json" \
+  -d '{"expr": {"type": "gGate", "evidence": [{"ref": "doc-1"}, {"ref": "doc-2"}], "policy": {"id": 1, "min_evidence": 2, "effective_at": 0}, "agent_id": 42}, "scope": 100}'
+```
+
 ## Структура репозитория
 ```
 gatelang-runtime/
