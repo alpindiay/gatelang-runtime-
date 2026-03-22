@@ -210,7 +210,7 @@ python3 -c "from gatelang.server import start_server; start_server()"
 | Endpoint | Метод | Описание |
 |---|---|---|
 | `/health` | GET | Health check |
-| `/info` | GET | Runtime info (1213 теорем, 0 sorry) |
+| `/info` | GET | Runtime info (1260 теорем, 0 sorry) |
 | `/run` | POST | Выполнить программу → LedgerRecord + 7-tuple |
 | `/typecheck` | POST | Проверить типы без выполнения |
 | `/compile` | POST | Скомпилировать → список LedgerRecord |
