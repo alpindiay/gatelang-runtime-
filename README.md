@@ -117,3 +117,6 @@ Lang/GateLangV2.lean, Lang/GateLangSemanticsV2.lean, Lang/GateLangE7Tuple.lean*
 
 ## GateLang Runtime (Python)
 **[github.com/alpindiay/gatelang-runtime-](https://github.com/alpindiay/gatelang-runtime-)** — Python implementation of GateLang v2. No dependencies, Python 3.8+.
+
+## GateLang Runtime (Python)
+**[github.com/alpindiay/gatelang-runtime-](https://github.com/alpindiay/gatelang-runtime-)** — Python implementation of GateLang v2. No dependencies, Python 3.8+.
