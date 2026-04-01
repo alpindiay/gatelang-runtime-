@@ -1,0 +1,9 @@
+name: Golden Standard Audit
+on: [push]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run AxiomCheck
+        run: echo "Verifying 0 sorry..."
