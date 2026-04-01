@@ -13,7 +13,7 @@ Author: A. A. Noh · UTE TLI SYSTEMS · DOI: 10.17605/OSF.IO/49UMB
 """
 
 from __future__ import annotations
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 from .types import (
     GVal, GUnit, GFact, GAgent, GRaw, GPair, GLeft, GRight,
@@ -195,88 +195,77 @@ def eval2(expr: GExpr, scope: int, context_policy: PolicySnapshot,
 # ══════════════════════════════════════════════
 
 def compile2(expr: GExpr, scope: int, context_policy: PolicySnapshot,
-             fuel: int) -> List[LedgerRecord]:
+             fuel: int, prev_hash: str = "") -> Tuple[List[LedgerRecord], str]:
     """
     Lean: def compile2 (e : GExpr2) (t : GScopeId) (pol : PolicySnapshot)
                        (fuel : Nat) : List LedgerRecord
 
-    Компилирует программу в список журнальных записей.
-
-    Теоремы:
-      no_spurious_facts  — compile2 (gEmit n) = []
-      compile2_gate_sound — все записи корректны (FactSound)
+    Компилирует программу в список журнальных записей с поддержкой Hash-Chain.
     """
     if fuel == 0:
-        return []
-    return _compile_rec(expr, scope, context_policy, fuel)
+        return [], prev_hash
+    return _compile_rec(expr, scope, context_policy, fuel, prev_hash)
 
 
 def _compile_rec(expr: GExpr, scope: int, pol: PolicySnapshot,
-                 fuel: int) -> List[LedgerRecord]:
-    """Рекурсивный компилятор."""
+                 fuel: int, current_hash: str = "") -> Tuple[List[LedgerRecord], str]:
+    """Рекурсивный компилятор с пробросом хэша."""
 
-    # gRet → []
-    if isinstance(expr, GRet):
-        return []
+    if isinstance(expr, GRet) or isinstance(expr, GEmit):
+        return [], current_hash
 
-    # gEmit → [] (теорема: no_spurious_facts)
-    if isinstance(expr, GEmit):
-        return []
-
-    # gGate pass → [LedgerRecord]
-    # gGate fail → []
     if isinstance(expr, GGate):
         eff_policy = policy_seq(pol, expr.policy)
         verdict = closure_gate(expr.evidence, eff_policy)
         if verdict == Verdict.PASS:
-            record = ledger_mk(scope, expr.evidence, eff_policy, scope)
-            return [record]
-        return []
+            from .types import LedgerRecord
+            record = LedgerRecord(
+                scope=scope,
+                verdict=verdict,
+                policy=eff_policy,
+                evidence=list(expr.evidence),
+                closed_at=scope,
+                prev_hash=current_hash
+            )
+            new_hash = record.compute_hash()
+            return [record], new_hash
+        return [], current_hash
 
-    # gSeq → конкатенация
     if isinstance(expr, GSeq):
-        return (_compile_rec(expr.e1, scope, pol, fuel) +
-                _compile_rec(expr.e2, scope, pol, fuel))
+        recs1, hash1 = _compile_rec(expr.e1, scope, pol, fuel, current_hash)
+        recs2, hash2 = _compile_rec(expr.e2, scope, pol, fuel, hash1)
+        return recs1 + recs2, hash2
 
-    # gGuard → записи тела если guard прошёл
     if isinstance(expr, GGuard):
         eff_policy = policy_seq(pol, expr.policy)
         if len(expr.evidence) >= eff_policy.min_evidence:
-            return _compile_rec(expr.body, scope, pol, fuel)
-        return []
+            return _compile_rec(expr.body, scope, pol, fuel, current_hash)
+        return [], current_hash
 
-    # gPar → записи обеих веток
     if isinstance(expr, GPar):
-        return (_compile_rec(expr.e1, scope, pol, fuel) +
-                _compile_rec(expr.e2, scope, pol, fuel))
+        recs1, hash1 = _compile_rec(expr.e1, scope, pol, fuel, current_hash)
+        recs2, hash2 = _compile_rec(expr.e2, scope, pol, fuel, hash1)
+        return recs1 + recs2, hash2
 
-    # gTry → если gstep2(e1) даёт GError, то записи e2
     if isinstance(expr, GTry):
         r1 = gstep2(expr.e1, scope, pol)
         if isinstance(r1, GError):
-            return _compile_rec(expr.e2, scope, pol, fuel)
-        return _compile_rec(expr.e1, scope, pol, fuel)
+            return _compile_rec(expr.e2, scope, pol, fuel, current_hash)
+        return _compile_rec(expr.e1, scope, pol, fuel, current_hash)
 
-    # gWith → тело под строгой политикой
     if isinstance(expr, GWith):
         local_pol = policy_seq(pol, expr.policy)
-        return _compile_rec(expr.body, scope, local_pol, fuel)
+        return _compile_rec(expr.body, scope, local_pol, fuel, current_hash)
 
-    # gWhile → fuel итераций
-    if isinstance(expr, GWhile):
+    if isinstance(expr, (GWhile, GLoop)):
         records = []
+        h = current_hash
         for _ in range(expr.fuel):
-            records.extend(_compile_rec(expr.body, scope, pol, fuel))
-        return records
+            recs, h = _compile_rec(expr.body, scope, pol, fuel, h)
+            records.extend(recs)
+        return records, h
 
-    # gLoop — аналог gWhile
-    if isinstance(expr, GLoop):
-        records = []
-        for _ in range(expr.fuel):
-            records.extend(_compile_rec(expr.body, scope, pol, fuel))
-        return records
-
-    return []
+    return [], current_hash
 
 
 # ══════════════════════════════════════════════
@@ -293,6 +282,7 @@ class ExecutionTrace:
     records: List[LedgerRecord]
     event7s: List[Event7]
     emit_codes: List[int]
+    final_hash: str = ""
 
     @property
     def success(self) -> bool:
@@ -375,7 +365,8 @@ def _collect_gate_events(expr: GExpr, pol: PolicySnapshot,
 
 def run(expr: GExpr, scope: int = 0,
         context_policy: Optional[PolicySnapshot] = None,
-        fuel: int = 1000) -> ExecutionTrace:
+        fuel: int = 1000,
+        prev_hash: str = "") -> ExecutionTrace:
     """
     Основная точка входа. Запустить программу и вернуть полный след.
     """
@@ -383,8 +374,13 @@ def run(expr: GExpr, scope: int = 0,
         context_policy = POLICY_ZERO
 
     result = eval2(expr, scope, context_policy, fuel)
-    records = compile2(expr, scope, context_policy, fuel)
+    records, final_hash = compile2(expr, scope, context_policy, fuel, prev_hash)
+
+    # Генерируем Event7 с хэшами
     event7s = _extract_event7s(records, expr, context_policy)
+    for e7 in event7s:
+        e7.hash = e7.compute_hash()
+
     emits = _collect_emits(expr)
 
     return ExecutionTrace(
@@ -394,5 +390,6 @@ def run(expr: GExpr, scope: int = 0,
         result=result,
         records=records,
         event7s=event7s,
-        emit_codes=emits
+        emit_codes=emits,
+        final_hash=final_hash
     )
