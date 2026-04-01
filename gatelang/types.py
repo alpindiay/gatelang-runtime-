@@ -23,6 +23,12 @@ class Verdict(Enum):
     PASS = "pass"
     CLOSED_WITH_MISSING_EVIDENCE = "closedWithMissingEvidence"
 
+class EscalationReason(Enum):
+    """Reasons for escalation gating (Claim 9) / interlock hold."""
+    TIME_EXPIRED = "time_expired"
+    AMBIGUOUS_LOGIC = "ambiguous_logic"
+    RUNTIME_ERROR = "runtime_error"
+
 
 @dataclass(frozen=True)
 class EvidenceRef:
@@ -256,6 +262,7 @@ class GGate(GExpr):
     evidence: List[EvidenceRef]
     policy: PolicySnapshot
     agent_id: int
+    expires_at: Optional[float] = None
 
     def __str__(self):
         ev_str = f"[{', '.join(e.ref for e in self.evidence)}]"
@@ -347,6 +354,8 @@ class Event7:
     ledger: LedgerRecord   # Λ
     policy: PolicySnapshot # Π
     hash: str = ""         # Хэш самого события
+    expires_at: Optional[float] = None  # Claim 10: Time-lock expiration
+    escalation_reason: Optional[EscalationReason] = None  # Claim 9
 
     @property
     def well_formed(self) -> bool:
@@ -390,6 +399,14 @@ class Event7:
                 f"  well_formed={self.well_formed},\n"
                 f"  hash={self.hash[:8]}...\n"
                 f")")
+
+    def is_expired(self, now: float) -> bool:
+        """Claim 10: time-lock check."""
+        if self.expires_at is None:
+            return False
+        return now > self.expires_at
+
+
 
 
 def gate_to_7tuple(evidence: List[EvidenceRef], policy: PolicySnapshot,
