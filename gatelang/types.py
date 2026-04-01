@@ -7,6 +7,8 @@ Author: A. A. Noh · UTE TLI SYSTEMS · DOI: 10.17605/OSF.IO/49UMB
 """
 
 from __future__ import annotations
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 from enum import Enum
@@ -48,6 +50,13 @@ class PolicySnapshot:
     def __str__(self):
         return f"Policy(id={self.id}, min={self.min_evidence}, eff={self.effective_at})"
 
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "min_evidence": self.min_evidence,
+            "effective_at": self.effective_at
+        }
+
 
 @dataclass(frozen=True)
 class LedgerRecord:
@@ -67,12 +76,27 @@ class LedgerRecord:
     policy: PolicySnapshot
     evidence: List[EvidenceRef]
     closed_at: int
+    prev_hash: str = ""  # Хэш предыдущей записи
 
     @property
     def valid(self) -> bool:
         """Lean: valid : verdict = closureGate evidence policy"""
         expected = closure_gate(self.evidence, self.policy)
         return self.verdict == expected
+
+    def to_dict(self) -> dict:
+        return {
+            "scope": self.scope,
+            "verdict": self.verdict.value,
+            "policy": self.policy.to_dict(),
+            "evidence": [e.ref for e in self.evidence],
+            "closed_at": self.closed_at,
+            "prev_hash": self.prev_hash
+        }
+
+    def compute_hash(self) -> str:
+        data = json.dumps(self.to_dict(), sort_keys=True).encode('utf-8')
+        return hashlib.sha256(data).hexdigest()
 
     def __str__(self):
         ev_str = f"[{', '.join(e.ref for e in self.evidence)}]"
@@ -81,7 +105,8 @@ class LedgerRecord:
                 f"verdict={self.verdict.value}, "
                 f"policy={self.policy}, "
                 f"evidence={ev_str}, "
-                f"closed_at={self.closed_at})")
+                f"closed_at={self.closed_at}, "
+                f"prev_hash={self.prev_hash[:8]}...)")
 
 
 # ══════════════════════════════════════════════
@@ -321,6 +346,7 @@ class Event7:
     outcome: Verdict       # Ω
     ledger: LedgerRecord   # Λ
     policy: PolicySnapshot # Π
+    hash: str = ""         # Хэш самого события
 
     @property
     def well_formed(self) -> bool:
@@ -338,6 +364,22 @@ class Event7:
             and self.ledger.verdict == self.outcome
         )
 
+    def to_dict(self) -> dict:
+        return {
+            "S": self.subject,
+            "C": self.context,
+            "X": [e.ref for e in self.execution],
+            "Gamma": self.conflict,
+            "Escalated": self.escalated,
+            "Omega": self.outcome.value,
+            "Lambda": self.ledger.to_dict(),
+            "Pi": self.policy.to_dict()
+        }
+
+    def compute_hash(self) -> str:
+        data = json.dumps(self.to_dict(), sort_keys=True).encode('utf-8')
+        return hashlib.sha256(data).hexdigest()
+
     def __str__(self):
         return (f"Event7(\n"
                 f"  S={self.subject}, C={self.context},\n"
@@ -345,7 +387,8 @@ class Event7:
                 f"  Γ={self.conflict}, Escalated={self.escalated},\n"
                 f"  Ω={self.outcome.value},\n"
                 f"  Π={self.policy},\n"
-                f"  well_formed={self.well_formed}\n"
+                f"  well_formed={self.well_formed},\n"
+                f"  hash={self.hash[:8]}...\n"
                 f")")
 
 

@@ -192,12 +192,13 @@ def create_app() -> "Flask":
             return err(f"Parse error: {parse_err}")
 
         try:
-            records = compile2(expr, scope, context_policy, fuel)
+            records, final_hash = compile2(expr, scope, context_policy, fuel)
             return ok({
                 "ok": True,
                 "records": [record_to_json(r) for r in records],
                 "count": len(records),
-                "all_valid": all(r.valid for r in records)
+                "all_valid": all(r.valid for r in records),
+                "final_hash": final_hash
             })
         except Exception as e:
             return err(f"Compile error: {str(e)}", 500)
