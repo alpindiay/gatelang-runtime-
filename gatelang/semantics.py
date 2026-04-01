@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from .types import (
     GVal, GUnit, GFact, GAgent, GRaw, GPair, GLeft, GRight,
     GExpr, GRet, GEmit, GGate, GSeq, GGuard, GPar, GTry, GWith, GWhile, GLoop,
-    PolicySnapshot, LedgerRecord, EvidenceRef, Verdict,
+    PolicySnapshot, LedgerRecord, EvidenceRef, Verdict, EscalationReason,
     POLICY_ZERO, policy_seq, closure_gate, ledger_mk,
     gate_to_7tuple, Event7
 )
@@ -216,6 +216,23 @@ def _compile_rec(expr: GExpr, scope: int, pol: PolicySnapshot,
 
     if isinstance(expr, GGate):
         eff_policy = policy_seq(pol, expr.policy)
+
+        # Claim 10: Time-lock check for GGate
+        if getattr(expr, 'expires_at', None) is not None:
+            import time as _time
+            if _time.time() > expr.expires_at:
+                from .types import GFact
+                record = LedgerRecord(
+                    scope=scope,
+                    verdict=Verdict.CLOSED_WITH_MISSING_EVIDENCE,
+                    policy=eff_policy,
+                    evidence=list(expr.evidence),
+                    closed_at=scope,
+                    prev_hash=current_hash
+                )
+                # Mark as escalated in metadata if possible
+                new_hash = record.compute_hash()
+                return [record], new_hash
         verdict = closure_gate(expr.evidence, eff_policy)
         if verdict == Verdict.PASS:
             from .types import LedgerRecord
@@ -311,6 +328,48 @@ class ExecutionTrace:
         return "\n".join(lines)
 
 
+def _time_lock_escalation_trace(expr: GExpr, scope: int, context_policy: PolicySnapshot, prev_hash: str) -> ExecutionTrace:
+    """
+    Claim 10: If an Event7 is time-expired, we do not execute semantics; we record an escalation ledger record.
+    This keeps hash-chain continuity and makes the hold auditable.
+    """
+    # Create a minimal escalation ledger record
+    rec = LedgerRecord(
+        scope=scope,
+        verdict=Verdict.CLOSED_WITH_MISSING_EVIDENCE,
+        policy=context_policy,
+        evidence=[],
+        closed_at=scope,
+        prev_hash=prev_hash,
+    )
+    new_hash = rec.compute_hash()
+    e7 = Event7(
+        subject=0,
+        context=scope,
+        execution=[],
+        conflict=False,
+        escalated=True,
+        outcome=Verdict.CLOSED_WITH_MISSING_EVIDENCE,
+        ledger=rec,
+        policy=context_policy,
+    )
+    try:
+        e7.escalation_reason = EscalationReason.TIME_EXPIRED
+    except Exception:
+        pass
+    e7.hash = e7.compute_hash()
+    return ExecutionTrace(
+        expr=expr,
+        scope=scope,
+        context_policy=context_policy,
+        result=GUnit(),
+        records=[rec],
+        event7s=[e7],
+        emit_codes=[],
+        final_hash=new_hash,
+    )
+
+
 def _collect_emits(expr: GExpr) -> List[int]:
     """Собрать все gEmit коды."""
     codes = []
@@ -366,17 +425,30 @@ def _collect_gate_events(expr: GExpr, pol: PolicySnapshot,
 def run(expr: GExpr, scope: int = 0,
         context_policy: Optional[PolicySnapshot] = None,
         fuel: int = 1000,
-        prev_hash: str = "") -> ExecutionTrace:
+        prev_hash: str = "", event: Optional[Event7] = None) -> ExecutionTrace:
     """
     Основная точка входа. Запустить программу и вернуть полный след.
     """
     if context_policy is None:
         context_policy = POLICY_ZERO
 
+        # Auto-detect expires_at from GGate if not provided in event
+    if event is None and isinstance(expr, GGate) and getattr(expr, 'expires_at', None) is not None:
+        # Create a dummy event for the existing time-lock check below
+        event = Event7(0, scope, [], False, False, Verdict.PASS, None, context_policy, expires_at=expr.expires_at)
+    # Claim 10: time-lock enforcement (semantic layer)
+    if event is not None and hasattr(event, "is_expired"):
+        try:
+            import time as _time
+            if event.is_expired(_time.time()):
+                return _time_lock_escalation_trace(expr, scope, context_policy, prev_hash)
+        except Exception:
+            pass
+
     result = eval2(expr, scope, context_policy, fuel)
     records, final_hash = compile2(expr, scope, context_policy, fuel, prev_hash)
 
-    # Генерируем Event7 с хэшами
+    # Генерируем Event7 из выражений (сохраняя agent_id)
     event7s = _extract_event7s(records, expr, context_policy)
     for e7 in event7s:
         e7.hash = e7.compute_hash()
