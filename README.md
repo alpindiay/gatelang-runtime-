@@ -1,3 +1,18 @@
+## ⚠️ Repository Positioning
+
+**IMPORTANT:** This repository is a **research prototype runtime** for gate evaluation. It does NOT define the canonical GateLang v1 specification.
+
+**Canonical Specification:** See separate specification documents:
+- `GATELANG_SPEC.md`
+- `GATELANG_GRAMMAR.md`
+- `GATELANG_STATIC_VALIDATION.md`
+- `GATELANG_SEMANTICS.md`
+- `GATELANG_EXAMPLES.md`
+
+**For Details:** See [POSITIONING.md](POSITIONING.md), [CORE_VS_EXTENDED.md](CORE_VS_EXTENDED.md), and [MIGRATION_DECISIONS.md](MIGRATION_DECISIONS.md).
+
+---
+
 # GateLang Runtime v0.1.0
 
 Верифицированный DSL для аудируемых систем управления действиями.  
