@@ -422,12 +422,50 @@ def _collect_gate_events(expr: GExpr, pol: PolicySnapshot,
         _collect_gate_events(expr.body, pol, acc)
 
 
+def _check_eval_compile_consistency(
+    result: Optional[GVal],
+    records: List[LedgerRecord],
+    expr: GExpr,
+) -> None:
+    """
+    Проверка консистентности eval2 и compile2.
+
+    Инварианты:
+      1. Все скомпилированные записи должны быть валидными
+         (verdict == closureGate(evidence, policy)).
+      2. Если eval2 вернул GFact, в compile2 должна быть хотя бы одна запись.
+      3. Если eval2 вернул GUnit для одиночного gGate, записей быть не должно.
+
+    Lean mirror: bigstep2_deterministic, compile2_gate_sound.
+    """
+    # Инвариант 1: все записи валидны
+    for i, rec in enumerate(records):
+        assert rec.valid, (
+            f"eval/compile mismatch: record[{i}] invalid — "
+            f"verdict={rec.verdict}, expected={closure_gate(rec.evidence, rec.policy)}"
+        )
+
+    # Инвариант 2: GFact ↔ наличие записи (только для одиночного gGate)
+    if isinstance(expr, GGate):
+        if isinstance(result, GFact):
+            assert len(records) >= 1, (
+                f"eval/compile mismatch: eval2 returned GFact but compile2 "
+                f"produced 0 records for gGate"
+            )
+        elif isinstance(result, GUnit):
+            assert len(records) == 0, (
+                f"eval/compile mismatch: eval2 returned GUnit but compile2 "
+                f"produced {len(records)} records for gGate"
+            )
+
+
 def run(expr: GExpr, scope: int = 0,
         context_policy: Optional[PolicySnapshot] = None,
         fuel: int = 1000,
         prev_hash: str = "", event: Optional[Event7] = None) -> ExecutionTrace:
     """
     Основная точка входа. Запустить программу и вернуть полный след.
+    Выполняет eval2 и compile2, проверяет их консистентность.
     """
     if context_policy is None:
         context_policy = POLICY_ZERO
@@ -447,6 +485,9 @@ def run(expr: GExpr, scope: int = 0,
 
     result = eval2(expr, scope, context_policy, fuel)
     records, final_hash = compile2(expr, scope, context_policy, fuel, prev_hash)
+
+    # Проверка консистентности eval2 ↔ compile2
+    _check_eval_compile_consistency(result, records, expr)
 
     # Генерируем Event7 из выражений (сохраняя agent_id)
     event7s = _extract_event7s(records, expr, context_policy)
